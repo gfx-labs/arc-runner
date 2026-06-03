@@ -15,7 +15,7 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       should_build: ${{ steps.resolve.outputs.should_build }}

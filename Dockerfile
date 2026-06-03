@@ -3,17 +3,43 @@ FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
 
 USER root
 
-# Install GitHub CLI
+# ── Common CI utilities ──────────────────────────────────────────────
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gpg-agent software-properties-common \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       ca-certificates \
+       file \
+       git-lfs \
+       gnupg \
+       gpg-agent \
+       libssl-dev \
+       make \
+       openssh-client \
+       pkg-config \
+       python3 \
+       python3-pip \
+       python3-venv \
+       rsync \
+       software-properties-common \
+       wget \
+       xz-utils \
+       zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── GitHub CLI ────────────────────────────────────────────────────────
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
        > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# ── yq (YAML processor) ──────────────────────────────────────────────
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" \
+       -o /usr/local/bin/yq \
+    && chmod +x /usr/local/bin/yq
 
 USER runner
