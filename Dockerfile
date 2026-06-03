@@ -19,6 +19,7 @@ RUN apt-get update \
        python3 \
        python3-pip \
        python3-venv \
+       rclone \
        rsync \
        software-properties-common \
        wget \
@@ -35,11 +36,5 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
-
-# ── yq (YAML processor) ──────────────────────────────────────────────
-RUN ARCH=$(dpkg --print-architecture) \
-    && curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" \
-       -o /usr/local/bin/yq \
-    && chmod +x /usr/local/bin/yq
 
 USER runner
