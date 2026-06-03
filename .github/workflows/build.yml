@@ -28,7 +28,7 @@ jobs:
           if [[ -n "${{ inputs.runner_version }}" ]]; then
             VERSION="${{ inputs.runner_version }}"
           else
-            VERSION=$(gh api repos/actions/runner/releases/latest --jq '.tag_name' | sed 's/^v//')
+            VERSION=$(gh api repos/falcondev-oss/github-actions-runner/releases/latest --jq '.tag_name' | sed 's/^v//')
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -48,7 +48,7 @@ jobs:
   build:
     needs: check
     if: needs.check.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: read
       packages: write

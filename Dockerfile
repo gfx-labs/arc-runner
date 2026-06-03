@@ -1,5 +1,5 @@
 ARG RUNNER_VERSION=latest
-FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
+FROM ghcr.io/falcondev-oss/github-actions-runner:${RUNNER_VERSION}
 
 USER root
 
