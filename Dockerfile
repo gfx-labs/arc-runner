@@ -25,6 +25,7 @@ RUN apt-get update \
        wget \
        xz-utils \
        zip \
+       zstd \
     && rm -rf /var/lib/apt/lists/*
 
 # ── GitHub CLI ────────────────────────────────────────────────────────
