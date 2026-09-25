@@ -133,6 +133,10 @@ RUN apt-get update \
        sccache \
        unzip \
     && rm -rf /var/lib/apt/lists/* \
+    # React Native's Gradle plugin looks for `ccache` on PATH and wires it in
+    # as the compiler launcher. sccache is command-line compatible for that
+    # use, and the container build in retail relies on the same symlink.
+    && ln -s /usr/bin/sccache /usr/local/bin/ccache \
     && mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
 
 RUN curl --fail --location --silent --show-error \
