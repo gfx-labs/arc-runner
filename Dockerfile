@@ -1,4 +1,7 @@
-ARG RUNNER_VERSION=latest
+# Default for local/manual builds. CI overrides this via --build-arg with the
+# resolved upstream release, so this value only matters when building by hand.
+# Pinned rather than `latest` so a plain `docker build` is reproducible.
+ARG RUNNER_VERSION=2.337.0
 FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 
 # Node major used for the preinstalled runtime, and the Playwright release whose
