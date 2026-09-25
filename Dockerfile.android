@@ -1,0 +1,161 @@
+# Runner image for Android builds.
+#
+# Separate from the general runner image because the Android SDK is several
+# gigabytes, most of it the NDK. Baking that into the shared image would make
+# every job on every pool pull it, including lint and typecheck jobs that never
+# touch Android, so this serves a dedicated scale set instead.
+#
+# It is a copy of the base Dockerfile rather than a layer on it: the two are
+# expected to diverge as this one is tuned for Android, and Playwright's ~89
+# browser packages are already dropped here. Keep the shared sections in sync
+# by hand until that divergence makes a common base worth extracting.
+#
+# Default for local/manual builds. CI overrides this via --build-arg with the
+# resolved upstream release, so this value only matters when building by hand.
+# Pinned rather than `latest` so a plain `docker build` is reproducible.
+ARG RUNNER_VERSION=2.337.0
+FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
+
+# Node major used for the preinstalled runtime. React Native builds run the
+# JavaScript bundler from the repository's own toolchain, so this only has to
+# be new enough to run yarn and the Expo CLI.
+ARG NODE_MAJOR=24
+
+# JDK major. This must track what the workflows ask for (they pin Temurin 21);
+# on a mismatch actions/setup-java just downloads its own copy and the
+# preinstall buys nothing. Gradle and sdkmanager both need it.
+ARG JAVA_MAJOR=21
+
+# Android SDK components. These must track buildx/android.Dockerfile in
+# oku-trade/retail. A mismatch is not a build failure: Gradle downloads
+# whatever the project asks for at job time, so the only symptom is a slow
+# build that silently re-fetches what this image was meant to provide.
+ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
+ARG ANDROID_PLATFORM=android-36
+ARG ANDROID_BUILD_TOOLS=36.0.0
+ARG ANDROID_NDK_VERSION=27.1.12297006
+ARG ANDROID_CMAKE_VERSION=3.22.1
+
+USER root
+
+# ── Common CI utilities ──────────────────────────────────────────────
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       ca-certificates \
+       file \
+       git-lfs \
+       gnupg \
+       gpg-agent \
+       libssl-dev \
+       make \
+       openssh-client \
+       pkg-config \
+       python3 \
+       python3-pip \
+       python3-venv \
+       rclone \
+       rsync \
+       software-properties-common \
+       wget \
+       xz-utils \
+       zip \
+       zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── GitHub CLI ────────────────────────────────────────────────────────
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Node.js ───────────────────────────────────────────────────────────
+# Ubuntu 24.04 ships Node 18, which Playwright rejects (it requires >=20), so
+# the distro package is not usable here. This is also what provides npx for the
+# Playwright step below.
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── JDK ───────────────────────────────────────────────────────────────
+# The Android release job signs the AAB on the host with jarsigner and checks
+# the upload certificate with keytool, so a JDK is needed even though the app
+# itself is built inside a container. Temurin matches what the workflow asks
+# for, so actions/setup-java finds it already present and skips its download.
+RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+       | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) main" \
+       > /etc/apt/sources.list.d/adoptium.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends temurin-${JAVA_MAJOR}-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Resolved rather than hardcoded to amd64, since this image is also published
+# for arm64 and the package path carries the Debian architecture. TARGETARCH is
+# supplied by buildx and must be re-declared to be usable in this stage.
+ARG TARGETARCH
+ENV JAVA_HOME=/usr/lib/jvm/temurin-${JAVA_MAJOR}-jdk-${TARGETARCH}
+
+# ── Ruby native-extension dependencies ────────────────────────────────
+# fastlane runs on the host to talk to Google Play, so the release jobs need
+# Ruby. The interpreter itself is NOT installed here: workflows pin an exact
+# version through ruby/setup-ruby, which downloads a prebuilt Ruby, and the
+# distro package is a different patch series (3.2 against the pinned 3.3), so
+# installing it would be dead weight that setup-ruby ignores.
+#
+# What is worth baking in are the headers its gems need to compile native
+# extensions, which otherwise pull from the Ubuntu archive on every job.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libffi-dev \
+       libyaml-dev \
+       zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Android SDK ───────────────────────────────────────────────────────
+# The reason this image exists. Gradle downloads missing components on demand,
+# so a build works without them; it just pays several minutes and a few
+# gigabytes of transfer on every job to do what this does once.
+#
+# sccache goes with it: React Native compiles C++ through the NDK, and without
+# a compiler cache that work repeats from scratch every run. The container
+# build in retail already relies on it for the same reason.
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:${PATH}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       sccache \
+       unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
+
+RUN curl --fail --location --silent --show-error \
+      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+      --output /tmp/android-commandline-tools.zip \
+    && unzip -q /tmp/android-commandline-tools.zip -d /tmp/android-commandline-tools \
+    && mv /tmp/android-commandline-tools/cmdline-tools "${ANDROID_SDK_ROOT}/cmdline-tools/latest" \
+    && rm -rf /tmp/android-commandline-tools /tmp/android-commandline-tools.zip
+
+# Split across layers so bumping the platform or build-tools does not force the
+# NDK, which is the bulk of the image, to download again.
+RUN yes | sdkmanager --licenses > /dev/null \
+    && sdkmanager --install \
+       'platform-tools' \
+       "platforms;${ANDROID_PLATFORM}" \
+       "build-tools;${ANDROID_BUILD_TOOLS}"
+
+RUN sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+
+RUN sdkmanager --install "cmake;${ANDROID_CMAKE_VERSION}"
+
+# Gradle writes into the SDK tree and sdkmanager records accepted licences
+# there, so it has to be writable by the user the job runs as.
+RUN chown -R runner:runner "${ANDROID_SDK_ROOT}"
+
+USER runner

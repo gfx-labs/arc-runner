@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - Dockerfile
+      - Dockerfile.android
       - .github/workflows/build.yml
   schedule:
     # Check for new upstream releases daily at 06:00 UTC
@@ -127,3 +128,53 @@ jobs:
           # not a release artifact.
           cache-from: type=gha
           cache-to: type=gha,mode=min,ignore-error=true
+
+  # Android runner image, published alongside the general one.
+  #
+  # Separate because the Android SDK is several gigabytes, most of it the NDK,
+  # and only one scale set needs it. A single image would make every job on
+  # every pool pull the SDK, including lint jobs that never touch Android.
+  #
+  # Built on amd64 only. The SDK's build-tools and NDK host binaries are x86_64,
+  # so an arm64 image would carry an SDK it cannot execute.
+  build-android:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    # Larger than the general image's runner: this one unpacks several
+    # gigabytes of SDK and NDK, which is disk- and CPU-bound rather than
+    # network-bound.
+    runs-on: ubicloud-standard-8
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.android
+          push: true
+          build-args: |
+            RUNNER_VERSION=${{ needs.check.outputs.version }}
+          tags: |
+            ${{ env.IMAGE_NAME }}-android:${{ needs.check.outputs.version }}
+            ${{ env.IMAGE_NAME }}-android:latest
+          platforms: linux/amd64
+          # Same reasoning as the general image: mode=min keeps the export to
+          # the final stage, and a cache failure must not fail a good build.
+          # Scoped separately so the two images do not evict each other.
+          cache-from: type=gha,scope=android
+          cache-to: type=gha,mode=min,scope=android,ignore-error=true
