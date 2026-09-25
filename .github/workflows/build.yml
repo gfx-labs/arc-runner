@@ -32,9 +32,20 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-          # Check if we already published this tag
+          # Check if we already published this tag.
+          #
+          # ghcr needs a bearer token from its token endpoint, not the raw
+          # GITHUB_TOKEN. The previous version sent base64(GITHUB_TOKEN) as the
+          # bearer, which ghcr rejected, so this always returned 404 and the
+          # skip never fired: every scheduled run rebuilt and repushed an image
+          # that already existed.
+          REGISTRY_TOKEN=$(curl -s -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+            "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY,,}:pull&service=ghcr.io" \
+            | jq -r '.token')
+
           STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $(echo "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)" \
+            -H "Authorization: Bearer ${REGISTRY_TOKEN}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json" \
             "https://ghcr.io/v2/${GITHUB_REPOSITORY,,}/manifests/${VERSION}")
 
           if [[ "$STATUS" == "200" ]]; then
@@ -77,5 +88,16 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
           platforms: linux/amd64,linux/arm64
+          # The image carries Node and the Playwright/Chromium system deps now,
+          # so it roughly doubled in size. mode=max exported every intermediate
+          # layer for both platforms and overwhelmed the GitHub Actions cache:
+          # the export failed with "Could not authorize multipart upload" and
+          # cancelled the in-flight push, so a fully built image was never
+          # published.
+          #
+          # mode=min only exports the final stage layers, which is what actually
+          # gets reused here. ignore-error keeps a cache hiccup from failing a
+          # build whose image is otherwise fine; the cache is an optimization,
+          # not a release artifact.
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min,ignore-error=true
