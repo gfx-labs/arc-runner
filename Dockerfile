@@ -12,6 +12,11 @@ FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 ARG NODE_MAJOR=24
 ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1789764292000
 
+# JDK major for the Android release jobs. This must track what the workflows
+# ask for (they pin Temurin 21); on a mismatch actions/setup-java just
+# downloads its own copy and the preinstall buys nothing.
+ARG JAVA_MAJOR=21
+
 USER root
 
 # ── Common CI utilities ──────────────────────────────────────────────
@@ -55,6 +60,41 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Playwright step below.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── JDK ───────────────────────────────────────────────────────────────
+# The Android release job signs the AAB on the host with jarsigner and checks
+# the upload certificate with keytool, so a JDK is needed even though the app
+# itself is built inside a container. Temurin matches what the workflow asks
+# for, so actions/setup-java finds it already present and skips its download.
+RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+       | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) main" \
+       > /etc/apt/sources.list.d/adoptium.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends temurin-${JAVA_MAJOR}-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Resolved rather than hardcoded to amd64, since this image is also published
+# for arm64 and the package path carries the Debian architecture. TARGETARCH is
+# supplied by buildx and must be re-declared to be usable in this stage.
+ARG TARGETARCH
+ENV JAVA_HOME=/usr/lib/jvm/temurin-${JAVA_MAJOR}-jdk-${TARGETARCH}
+
+# ── Ruby native-extension dependencies ────────────────────────────────
+# fastlane runs on the host to talk to Google Play, so the release jobs need
+# Ruby. The interpreter itself is NOT installed here: workflows pin an exact
+# version through ruby/setup-ruby, which downloads a prebuilt Ruby, and the
+# distro package is a different patch series (3.2 against the pinned 3.3), so
+# installing it would be dead weight that setup-ruby ignores.
+#
+# What is worth baking in are the headers its gems need to compile native
+# extensions, which otherwise pull from the Ubuntu archive on every job.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libffi-dev \
+       libyaml-dev \
+       zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Playwright system dependencies ────────────────────────────────────
