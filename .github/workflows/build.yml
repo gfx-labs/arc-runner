@@ -11,6 +11,7 @@ on:
     paths:
       - Dockerfile
       - Dockerfile.android
+      - toolcache/**
       - .github/workflows/build.yml
   schedule:
     # Check for new upstream releases daily at 06:00 UTC

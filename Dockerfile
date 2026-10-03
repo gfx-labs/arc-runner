@@ -83,10 +83,8 @@ ENV JAVA_HOME=/usr/lib/jvm/temurin-${JAVA_MAJOR}-jdk-${TARGETARCH}
 
 # ── Ruby native-extension dependencies ────────────────────────────────
 # fastlane runs on the host to talk to Google Play, so the release jobs need
-# Ruby. The interpreter itself is NOT installed here: workflows pin an exact
-# version through ruby/setup-ruby, which downloads a prebuilt Ruby, and the
-# distro package is a different patch series (3.2 against the pinned 3.3), so
-# installing it would be dead weight that setup-ruby ignores.
+# Ruby. Exact interpreter versions are installed into the tool cache below
+# using ruby/setup-ruby rather than the distro package.
 #
 # What is worth baking in are the headers its gems need to compile native
 # extensions, which otherwise pull from the Ubuntu archive on every job.
@@ -114,7 +112,13 @@ RUN apt-get update \
 RUN npx --yes --package=playwright@${PLAYWRIGHT_VERSION} playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
-# ruby/setup-ruby's prebuilt Linux Rubies require this non-relocatable prefix.
-RUN install -d -o runner -g runner /opt/hostedtoolcache
+# Ruby's prebuilt binaries require this non-relocatable cache prefix.
+ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+COPY toolcache/ /opt/runner-toolcache/
+RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
+    && chown -R runner:runner /opt/hostedtoolcache
 
 USER runner
+
+RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify

@@ -1,0 +1,47 @@
+{
+  "actions": {
+    "node": {
+      "repository": "actions/setup-node",
+      "revision": "249970729cb0ef3589644e2896645e5dc5ba9c38",
+      "runtime": "node24",
+      "entrypoint": "dist/setup/index.js",
+      "inputs": {
+        "check-latest": "false",
+        "package-manager-cache": "false",
+        "cache": ""
+      }
+    },
+    "go": {
+      "repository": "actions/setup-go",
+      "revision": "924ae3a1cded613372ab5595356fb5720e22ba16",
+      "runtime": "node24",
+      "entrypoint": "dist/setup/index.js",
+      "inputs": {
+        "check-latest": "false",
+        "cache": "false"
+      }
+    },
+    "ruby": {
+      "repository": "ruby/setup-ruby",
+      "revision": "95ef2b042f9d7a56d8268cba8559e2842e2ad01b",
+      "runtime": "node24",
+      "entrypoint": "dist/index.js",
+      "inputs": {
+        "bundler-cache": "false",
+        "bundler": "none",
+        "rubygems": "default",
+        "self-hosted": "false"
+      }
+    }
+  },
+  "tools": {
+    "node": ["24.21.0"],
+    "go": ["1.25.14"],
+    "ruby": ["3.3.12"]
+  },
+  "verifyRequests": {
+    "node": {"24.21.0": "24"},
+    "go": {"1.25.14": "1.25.x"},
+    "ruby": {"3.3.12": "3.3"}
+  }
+}
