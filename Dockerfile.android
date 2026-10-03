@@ -21,9 +21,8 @@ FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 # be new enough to run yarn and the Expo CLI.
 ARG NODE_MAJOR=24
 
-# JDK major. This must track what the workflows ask for (they pin Temurin 21);
-# on a mismatch actions/setup-java just downloads its own copy and the
-# preinstall buys nothing. Gradle and sdkmanager both need it.
+# JDK major used by Gradle and sdkmanager. The apt installation does not
+# populate the separate Actions cache used by actions/setup-java.
 ARG JAVA_MAJOR=21
 
 # Android SDK components. These must track buildx/android.Dockerfile in
@@ -163,10 +162,13 @@ RUN chown -R runner:runner "${ANDROID_SDK_ROOT}"
 # Ruby's prebuilt binaries require this non-relocatable cache prefix.
 ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+ENV COREPACK_HOME=/opt/corepack
 COPY toolcache/ /opt/runner-toolcache/
 RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
-    && chown -R runner:runner /opt/hostedtoolcache
+    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs \
+    && chown -R runner:runner /opt/hostedtoolcache /opt/corepack
 
 USER runner
 
-RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify
+RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify \
+    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs --verify

@@ -10,11 +10,9 @@ FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 # `playwright install-deps` can still find something missing and go to the
 # network. See the Playwright section below.
 ARG NODE_MAJOR=24
-ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1789764292000
+ARG PLAYWRIGHT_VERSION=1.63.0
 
-# JDK major for the Android release jobs. This must track what the workflows
-# ask for (they pin Temurin 21); on a mismatch actions/setup-java just
-# downloads its own copy and the preinstall buys nothing.
+# JDK major used by Gradle and host-side signing tools.
 ARG JAVA_MAJOR=21
 
 USER root
@@ -65,8 +63,8 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
 # ── JDK ───────────────────────────────────────────────────────────────
 # The Android release job signs the AAB on the host with jarsigner and checks
 # the upload certificate with keytool, so a JDK is needed even though the app
-# itself is built inside a container. Temurin matches what the workflow asks
-# for, so actions/setup-java finds it already present and skips its download.
+# itself is built inside a container. This apt installation does not populate
+# the separate Actions cache used by actions/setup-java.
 RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
        | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) main" \
@@ -96,8 +94,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Playwright system dependencies ────────────────────────────────────
-# `playwright install-deps chromium` pulls ~89 apt packages (libnss3, libgbm1,
-# xvfb, mesa, fonts, ...). Runners are ephemeral pods, so without this every job
+# Browser dependencies include libnss3, GTK, xvfb, mesa, and fonts.
+# Runners are ephemeral pods, so without this every job
 # re-installed all of them from the Ubuntu archive before the browser could
 # start.
 #
@@ -106,19 +104,22 @@ RUN apt-get update \
 # actually requires. The CI step is kept in the workflows: once the packages are
 # already present it is a dpkg no-op instead of a download.
 #
-# The browser binary is deliberately NOT baked in. Workflows set
-# PLAYWRIGHT_BROWSERS_PATH to a per-run temp dir restored by actions/cache, so a
-# browser installed here would not be found and would only add image weight.
-RUN npx --yes --package=playwright@${PLAYWRIGHT_VERSION} playwright install-deps chromium \
+# Browser binaries remain in workflow caches whose locations vary by job.
+# PostgreSQL's client is needed by account's database smoke check.
+RUN npx --yes --package=playwright@${PLAYWRIGHT_VERSION} playwright install-deps chromium firefox \
+    && apt-get install -y --no-install-recommends postgresql-client \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
 # Ruby's prebuilt binaries require this non-relocatable cache prefix.
 ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+ENV COREPACK_HOME=/opt/corepack
 COPY toolcache/ /opt/runner-toolcache/
 RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
-    && chown -R runner:runner /opt/hostedtoolcache
+    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs \
+    && chown -R runner:runner /opt/hostedtoolcache /opt/corepack
 
 USER runner
 
-RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify
+RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify \
+    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs --verify
