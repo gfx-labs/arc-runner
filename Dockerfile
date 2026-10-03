@@ -114,4 +114,7 @@ RUN apt-get update \
 RUN npx --yes --package=playwright@${PLAYWRIGHT_VERSION} playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
+# ruby/setup-ruby's prebuilt Linux Rubies require this non-relocatable prefix.
+RUN install -d -o runner -g runner /opt/hostedtoolcache
+
 USER runner

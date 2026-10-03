@@ -162,4 +162,7 @@ RUN sdkmanager --install "cmake;${ANDROID_CMAKE_VERSION}"
 # there, so it has to be writable by the user the job runs as.
 RUN chown -R runner:runner "${ANDROID_SDK_ROOT}"
 
+# ruby/setup-ruby's prebuilt Linux Rubies require this non-relocatable prefix.
+RUN install -d -o runner -g runner /opt/hostedtoolcache
+
 USER runner
