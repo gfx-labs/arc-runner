@@ -1,7 +1,7 @@
 # Go build cache client (GOCACHEPROG). Pinned by digest so a rebuild of this
 # image cannot pick up a different client than the one reviewed here. The
 # server it talks to is set per scale set through ARC_GOCACHE_URL.
-ARG GOCACHEPROG_IMAGE=ghcr.io/gfx-labs/arc-gocacheprog:sha-cfadbba@sha256:c4183197ff427952fe62a63e6e72ea54d2b0cb20a6ebf050f3282a66099ca47e
+ARG GOCACHEPROG_IMAGE=ghcr.io/gfx-labs/arc-gocacheprog:0.0.1@sha256:3647c39f14b6ca5e9a5006de4aa05188b3bd02034b80057d94a587fcf9b61027
 
 # Default for local/manual builds. CI overrides this via --build-arg with the
 # resolved upstream release, so this value only matters when building by hand.
