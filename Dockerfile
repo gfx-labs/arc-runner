@@ -12,6 +12,19 @@ ARG RUNNER_VERSION=2.337.0
 # must come after them.
 FROM ${GOCACHEPROG_IMAGE} AS gocacheprog
 
+# Tool cache built from the bare runner image so its cache key depends only on
+# toolcache/ and the base image, not on the apt layers of the final stage.
+FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION} AS toolcache
+USER root
+# No system Node here. corepack.mjs uses the runner's bundled corepack.
+ENV PATH=/home/runner/externals/node24/bin:${PATH}
+ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+ENV COREPACK_HOME=/opt/corepack
+COPY toolcache/ /opt/runner-toolcache/
+RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
+    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs
+
 FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 
 # Node major used for the preinstalled runtime, and the Playwright release whose
@@ -130,10 +143,10 @@ RUN npx --yes --package=playwright@${PLAYWRIGHT_VERSION} playwright install-deps
 ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
 ENV COREPACK_HOME=/opt/corepack
-COPY toolcache/ /opt/runner-toolcache/
-RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
-    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs \
-    && chown -R runner:runner /opt/hostedtoolcache /opt/corepack
+COPY --from=toolcache /opt/runner-toolcache/ /opt/runner-toolcache/
+COPY --from=toolcache /opt/setup-actions/ /opt/setup-actions/
+COPY --from=toolcache --chown=runner:runner /opt/hostedtoolcache/ /opt/hostedtoolcache/
+COPY --from=toolcache --chown=runner:runner /opt/corepack/ /opt/corepack/
 
 USER runner
 

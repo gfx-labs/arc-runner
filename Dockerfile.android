@@ -20,9 +20,71 @@ ARG GOCACHEPROG_IMAGE=ghcr.io/gfx-labs/arc-gocacheprog:0.0.1@sha256:3647c39f14b6
 # Pinned rather than `latest` so a plain `docker build` is reproducible.
 ARG RUNNER_VERSION=2.337.0
 
+# Android SDK components. These must track buildx/android.Dockerfile in
+# oku-trade/retail. A mismatch is not a build failure: Gradle downloads
+# whatever the project asks for at job time, so the only symptom is a slow
+# build that silently re-fetches what this image was meant to provide.
+ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
+ARG ANDROID_PLATFORM=android-36
+ARG ANDROID_BUILD_TOOLS=36.0.0
+ARG ANDROID_NDK_VERSION=27.1.12297006
+ARG ANDROID_CMAKE_VERSION=3.22.1
+
 # Stage only used to copy the client binary. ARGs above are global, so it
 # must come after them.
 FROM ${GOCACHEPROG_IMAGE} AS gocacheprog
+
+# Tool cache built from the bare runner image so its cache key depends only on
+# toolcache/ and the base image, not on the apt layers of the final stage.
+FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION} AS toolcache
+USER root
+# No system Node here. corepack.mjs uses the runner's bundled corepack.
+ENV PATH=/home/runner/externals/node24/bin:${PATH}
+ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+ENV COREPACK_HOME=/opt/corepack
+COPY toolcache/ /opt/runner-toolcache/
+RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
+    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs
+
+# ── Android SDK ───────────────────────────────────────────────────────
+# The reason this image exists. Gradle downloads missing components on demand,
+# so a build works without them; it just pays several minutes and a few
+# gigabytes of transfer on every job to do what this does once.
+#
+# Built in its own stage so the multi-gigabyte download is cached independently
+# of the runner base and apt layers. sdkmanager only needs a JDK.
+FROM eclipse-temurin:21-jdk-noble@sha256:b468c3fc688b14450571494f588bd939378e7fd542ed5a73f8efc13f17872a87 AS android-sdk
+ARG ANDROID_CMDLINE_TOOLS_VERSION
+ARG ANDROID_PLATFORM
+ARG ANDROID_BUILD_TOOLS
+ARG ANDROID_NDK_VERSION
+ARG ANDROID_CMAKE_VERSION
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:${PATH}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools" \
+    && curl --fail --location --silent --show-error \
+      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+      --output /tmp/android-commandline-tools.zip \
+    && unzip -q /tmp/android-commandline-tools.zip -d /tmp/android-commandline-tools \
+    && mv /tmp/android-commandline-tools/cmdline-tools "${ANDROID_SDK_ROOT}/cmdline-tools/latest" \
+    && rm -rf /tmp/android-commandline-tools /tmp/android-commandline-tools.zip
+
+# Split across layers so bumping the platform or build-tools does not force the
+# NDK, which is the bulk of the image, to download again.
+RUN yes | sdkmanager --licenses > /dev/null \
+    && sdkmanager --install \
+       'platform-tools' \
+       "platforms;${ANDROID_PLATFORM}" \
+       "build-tools;${ANDROID_BUILD_TOOLS}"
+
+RUN sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+
+RUN sdkmanager --install "cmake;${ANDROID_CMAKE_VERSION}"
 
 FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 
@@ -35,17 +97,15 @@ ARG NODE_MAJOR=24
 # populate the separate Actions cache used by actions/setup-java.
 ARG JAVA_MAJOR=21
 
-# Android SDK components. These must track buildx/android.Dockerfile in
-# oku-trade/retail. A mismatch is not a build failure: Gradle downloads
-# whatever the project asks for at job time, so the only symptom is a slow
-# build that silently re-fetches what this image was meant to provide.
-ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
-ARG ANDROID_PLATFORM=android-36
-ARG ANDROID_BUILD_TOOLS=36.0.0
-ARG ANDROID_NDK_VERSION=27.1.12297006
-ARG ANDROID_CMAKE_VERSION=3.22.1
-
 USER root
+
+# Copied first so changes to the apt layers below do not produce a new
+# multi-gigabyte layer. Gradle writes into the SDK tree and sdkmanager records
+# accepted licences there, so it has to be writable by the job user.
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:${PATH}
+COPY --from=android-sdk --chown=runner:runner /opt/android-sdk/ /opt/android-sdk/
 
 # ── Common CI utilities ──────────────────────────────────────────────
 RUN apt-get update \
@@ -129,18 +189,10 @@ RUN apt-get update \
        zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Android SDK ───────────────────────────────────────────────────────
-# The reason this image exists. Gradle downloads missing components on demand,
-# so a build works without them; it just pays several minutes and a few
-# gigabytes of transfer on every job to do what this does once.
-#
-# sccache goes with it: React Native compiles C++ through the NDK, and without
-# a compiler cache that work repeats from scratch every run. The container
-# build in retail already relies on it for the same reason.
-ENV ANDROID_SDK_ROOT=/opt/android-sdk
-ENV ANDROID_HOME=/opt/android-sdk
-ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:${PATH}
-
+# ── sccache ───────────────────────────────────────────────────────────
+# React Native compiles C++ through the NDK, and without a compiler cache that
+# work repeats from scratch every run. The container build in retail already
+# relies on it for the same reason.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        sccache \
@@ -149,40 +201,16 @@ RUN apt-get update \
     # React Native's Gradle plugin looks for `ccache` on PATH and wires it in
     # as the compiler launcher. sccache is command-line compatible for that
     # use, and the container build in retail relies on the same symlink.
-    && ln -s /usr/bin/sccache /usr/local/bin/ccache \
-    && mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
-
-RUN curl --fail --location --silent --show-error \
-      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
-      --output /tmp/android-commandline-tools.zip \
-    && unzip -q /tmp/android-commandline-tools.zip -d /tmp/android-commandline-tools \
-    && mv /tmp/android-commandline-tools/cmdline-tools "${ANDROID_SDK_ROOT}/cmdline-tools/latest" \
-    && rm -rf /tmp/android-commandline-tools /tmp/android-commandline-tools.zip
-
-# Split across layers so bumping the platform or build-tools does not force the
-# NDK, which is the bulk of the image, to download again.
-RUN yes | sdkmanager --licenses > /dev/null \
-    && sdkmanager --install \
-       'platform-tools' \
-       "platforms;${ANDROID_PLATFORM}" \
-       "build-tools;${ANDROID_BUILD_TOOLS}"
-
-RUN sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
-
-RUN sdkmanager --install "cmake;${ANDROID_CMAKE_VERSION}"
-
-# Gradle writes into the SDK tree and sdkmanager records accepted licences
-# there, so it has to be writable by the user the job runs as.
-RUN chown -R runner:runner "${ANDROID_SDK_ROOT}"
+    && ln -s /usr/bin/sccache /usr/local/bin/ccache
 
 # Ruby's prebuilt binaries require this non-relocatable cache prefix.
 ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
 ENV COREPACK_HOME=/opt/corepack
-COPY toolcache/ /opt/runner-toolcache/
-RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
-    && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs \
-    && chown -R runner:runner /opt/hostedtoolcache /opt/corepack
+COPY --from=toolcache /opt/runner-toolcache/ /opt/runner-toolcache/
+COPY --from=toolcache /opt/setup-actions/ /opt/setup-actions/
+COPY --from=toolcache --chown=runner:runner /opt/hostedtoolcache/ /opt/hostedtoolcache/
+COPY --from=toolcache --chown=runner:runner /opt/corepack/ /opt/corepack/
 
 USER runner
 

@@ -116,19 +116,12 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
           platforms: linux/amd64
-          # The image carries Node and the Playwright/Chromium system deps now,
-          # so it roughly doubled in size. mode=max exported every intermediate
-          # layer and overwhelmed the GitHub Actions cache:
-          # the export failed with "Could not authorize multipart upload" and
-          # cancelled the in-flight push, so a fully built image was never
-          # published.
-          #
-          # mode=min only exports the final stage layers, which is what actually
-          # gets reused here. ignore-error keeps a cache hiccup from failing a
-          # build whose image is otherwise fine; the cache is an optimization,
-          # not a release artifact.
-          cache-from: type=gha
-          cache-to: type=gha,mode=min,ignore-error=true
+          # Registry cache on ghcr. The GitHub Actions cache could not hold
+          # mode=max exports ("Could not authorize multipart upload"), and
+          # mode=max is needed so the toolcache builder stage is reused.
+          # ignore-error keeps a cache failure from failing a good build.
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
   # Android runner image, published alongside the general one.
   #
@@ -174,8 +167,7 @@ jobs:
             ${{ env.IMAGE_NAME }}-android:${{ needs.check.outputs.version }}
             ${{ env.IMAGE_NAME }}-android:latest
           platforms: linux/amd64
-          # Same reasoning as the general image: mode=min keeps the export to
-          # the final stage, and a cache failure must not fail a good build.
-          # Scoped separately so the two images do not evict each other.
-          cache-from: type=gha,scope=android
-          cache-to: type=gha,mode=min,scope=android,ignore-error=true
+          # Same registry cache as the general image, under the Android
+          # package. mode=max keeps the SDK and toolcache stages reusable.
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}-android:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}-android:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
