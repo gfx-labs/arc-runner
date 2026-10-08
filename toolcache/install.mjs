@@ -211,7 +211,13 @@ function runAction(tool, action, sourceDir, version, verify) {
     for (const [k, v] of Object.entries(inputs)) env[`INPUT_${k.replace(/ /g, '_').toUpperCase()}`] = String(v)
 
     log(`${verify ? 'verifying' : 'installing'} ${tool} ${version} (request ${request}) via ${action.repository}@${action.revision.slice(0, 12)}`)
-    const r = spawnSync(bootstrapNode(action.runtime), [entry], { cwd: workspace, env, stdio: 'inherit' })
+    const r = spawnSync(bootstrapNode(action.runtime), [entry], {
+      cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 28,
+    })
+    // Defang workflow commands so the outer CI runner does not execute them from the build log.
+    const defang = (buf) => buf.toString().replace(/##\[/g, '#_[').replace(/^(\s*)::/gm, '$1:_')
+    process.stdout.write(defang(r.stdout ?? ''))
+    process.stderr.write(defang(r.stderr ?? ''))
     if (r.error) throw r.error
     if (r.status !== 0) die(`${tool} ${version}: action exited with ${r.signal ?? r.status}`)
     validate(tool, version, files)
