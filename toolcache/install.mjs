@@ -17,17 +17,21 @@ const toolCache = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache'
 const home = process.env.HOME || os.userInfo().homedir
 
 const EXACT = /^\d+\.\d+\.\d+$/
+// Version aliases resolved by the action at install time. The resolved exact versions are
+// recorded in resolved.json so --verify can run offline.
+const ALIASES = { go: ['stable', 'oldstable'] }
+const resolvedFile = path.join(here, 'resolved.json')
 const SHA = /^[0-9a-f]{40}$/
 const PASS_ENV = ['PATH', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM',
   'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy']
 const BLOCKED_ENV = /^(LD_|NODE_OPTIONS$|BASH_ENV$|ENV$|GITHUB_|RUNNER_|ACTIONS_|INPUT_)/
 
-// Checks run against the installed binary; `ver` is the exact requested version.
+// Checks run against the installed binary. `parse` extracts the exact version from its output.
 const BINARIES = {
-  node: { args: ['--version'], ok: (out, ver) => out.trim() === `v${ver}` },
-  go: { args: ['version'], ok: (out, ver) => out.startsWith(`go version go${ver} `) },
-  ruby: { args: ['-e', 'print RUBY_VERSION'], ok: (out, ver) => out.trim() === ver },
+  node: { args: ['--version'], parse: (out) => out.trim().replace(/^v/, '') },
+  go: { args: ['version'], parse: (out) => out.match(/^go version go(\S+) /)?.[1] },
+  ruby: { args: ['-e', 'print RUBY_VERSION'], parse: (out) => out.trim() },
 }
 
 function parseArgs(argv) {
@@ -55,7 +59,9 @@ function validateManifest(tool) {
   }
   const versions = manifest.tools[tool]
   if (!Array.isArray(versions) || !versions.length) die(`${tool}: no versions in manifest`)
-  for (const v of versions) if (!EXACT.test(v)) die(`${tool}: version ${v} is not an exact semver`)
+  for (const v of versions) {
+    if (!EXACT.test(v) && !ALIASES[tool]?.includes(v)) die(`${tool}: version ${v} is not an exact semver or known alias`)
+  }
   return action
 }
 
@@ -169,6 +175,7 @@ function baseEnv(verify) {
   return env
 }
 
+// Installs `version` (exact or alias) and returns the exact version that was installed.
 function runAction(tool, action, sourceDir, version, verify) {
   const runs = readRuns(sourceDir)
   if (runs.using !== action.runtime) die(`${tool}: action.yml runs.using=${runs.using}, manifest expects ${action.runtime}`)
@@ -220,13 +227,14 @@ function runAction(tool, action, sourceDir, version, verify) {
     process.stderr.write(defang(r.stderr ?? ''))
     if (r.error) throw r.error
     if (r.status !== 0) die(`${tool} ${version}: action exited with ${r.signal ?? r.status}`)
-    validate(tool, version, files)
+    return validate(tool, version, files)
   } finally {
     fs.rmSync(runnerTemp, { recursive: true, force: true })
   }
 }
 
 // Runs the binary the action put on PATH and requires it to live in the tool cache.
+// For an alias, any exact version is accepted and returned.
 function validate(tool, version, files) {
   const cacheReal = fs.realpathSync(toolCache)
   const addPaths = parseGithubPath(files.PATH)
@@ -243,12 +251,17 @@ function validate(tool, version, files) {
   env.PATH = [...addPaths, env.PATH].join(':')
   const spec = BINARIES[tool]
   const out = execFileSync(bin, spec.args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
-  if (!spec.ok(out, version)) die(`${tool}: expected ${version}, got ${JSON.stringify(out.trim())}`)
-  log(`${tool} ${version} ok at ${prefix}`)
+  const got = spec.parse(out)
+  const alias = ALIASES[tool]?.includes(version)
+  if (!got || !EXACT.test(got) || (!alias && got !== version)) die(`${tool}: expected ${version}, got ${JSON.stringify(out.trim())}`)
+  if (alias && path.basename(path.dirname(prefix)) !== got) die(`${tool}: ${version} installed ${got} at unexpected ${prefix}`)
+  log(`${tool} ${alias ? `${version} = ${got}` : got} ok at ${prefix}`)
+  return got
 }
 
 function main() {
   const opts = parseArgs(process.argv.slice(2))
+  const resolved = fs.existsSync(resolvedFile) ? JSON.parse(fs.readFileSync(resolvedFile, 'utf8')) : {}
   for (const tool of opts.tools) {
     const action = validateManifest(tool)
     const dest = path.join(actionsRoot, tool, action.revision)
@@ -257,7 +270,23 @@ function main() {
     } else {
       fetchAction(tool, action)
     }
-    for (const version of manifest.tools[tool]) runAction(tool, action, dest, version, opts.verify)
+    for (const version of manifest.tools[tool]) {
+      if (opts.verify && ALIASES[tool]?.includes(version)) {
+        // Verify the exact version the alias resolved to, requested exactly so no network is needed.
+        const exact = resolved[tool]?.[version] ?? die(`${tool}: ${version} missing from ${resolvedFile}`)
+        runAction(tool, action, dest, exact, true)
+        continue
+      }
+      const got = runAction(tool, action, dest, version, opts.verify)
+      if (ALIASES[tool]?.includes(version)) (resolved[tool] ??= {})[version] = got
+    }
+  }
+  if (!opts.verify) {
+    // Optional pin from the build (GO_STABLE) so a stale cached layer cannot slip through.
+    const want = process.env.GO_STABLE
+    const got = resolved.go?.stable
+    if (want && got && want.replace(/^go/, '') !== got) die(`go stable resolved to ${got}, build expected ${want}`)
+    fs.writeFileSync(resolvedFile, JSON.stringify(resolved, null, 2) + '\n')
   }
   log('done')
 }

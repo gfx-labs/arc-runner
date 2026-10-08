@@ -2,7 +2,9 @@
 
 Both images preinstall the versions in `manifest.json` by executing the compiled entrypoints of pinned `actions/setup-node`, `actions/setup-go`, and `ruby/setup-ruby` revisions. The runner's bundled Node executes the actions. No action dependencies are installed from npm.
 
-The manifest currently includes Node 24.21.0, Go 1.25.14 and 1.26.6, and Ruby 3.3.12. Account's `go-version-file: go.mod` selects exactly 1.26.6. Ruby's action revision matches retail because its bundled release list controls which patch a `3.3` request selects. See [the consumer audit](consumers.md) for source references and other dependency gaps.
+The manifest currently includes Node 24.21.0, Go 1.25.14, 1.26.6, and `stable`, and Ruby 3.3.12. Account's `go-version-file: go.mod` selects exactly 1.26.6. Ruby's action revision matches retail because its bundled release list controls which patch a `3.3` request selects. See [the consumer audit](consumers.md) for source references and other dependency gaps.
+
+`stable` is resolved by setup-go when the image is built, so every build includes the latest Go release. CI looks up that release on go.dev and passes it as the `GO_STABLE` build arg. A new Go release therefore invalidates the cached toolcache stage, and the install fails if the action resolves a different version. The resolved version is written to `resolved.json` next to the manifest, which the offline verification uses.
 
 The wrappers provide action inputs and temporary GitHub command files. Dependency caching, Bundler installation, and authentication inputs are disabled during provisioning. Runtime downloads and cache metadata are handled by the official actions.
 
