@@ -34,3 +34,30 @@ docker run --rm --network none --entrypoint /home/runner/externals/node24/bin/no
 Provision or verify a single tool with `--tool node`, `--tool go`, or `--tool ruby`. The verification mode never downloads action sources and uses a dead proxy as an additional check. Container network isolation is the definitive no-download check.
 
 Build the general image with `docker build -t arc-runner:toolcache .` and the Android image with `docker build -f Dockerfile.android -t arc-runner-android:toolcache .`. The publication workflow builds both images for amd64 only.
+
+## Go build cache
+
+Both images include the [arc-gocacheprog](https://github.com/gfx-labs/arc-gocacheprog) client at `/usr/local/bin/arc-gocacheprog` (on `PATH`), copied from a digest-pinned image (`GOCACHEPROG_IMAGE` in each Dockerfile). It is not enabled by default. A job opts in:
+
+```yaml
+jobs:
+  test:
+    permissions:
+      contents: read
+      id-token: write   # the client exchanges this for a cache token
+    env:
+      GOCACHEPROG: arc-gocacheprog
+      ARC_GOCACHE_URL: http://arc-gocacheprog.<namespace>.svc
+      ARC_GOCACHE_VERBOSE: "1"   # hit/miss stats after each go command
+    steps:
+      - uses: actions/setup-go@...
+        with:
+          go-version-file: go.mod
+          cache: false   # do not also restore ~/.cache/go-build
+```
+
+The server scopes entries by repository and ref. A job writes only to its own ref and reads its own ref, the pull request base branch, and the server's default branches. Without `id-token: write` or `ARC_GOCACHE_URL` the client uses a local disk cache and the build still succeeds.
+
+Leave `GOCACHEPROG` unset in jobs that build release artifacts, so they compile from a clean cache. `GOCACHE` still holds fuzzing corpora and must stay writable.
+
+To update the client, change the digest in both Dockerfiles. Each image build runs the client with networking disabled and fails if it does not answer the GOCACHEPROG handshake.
