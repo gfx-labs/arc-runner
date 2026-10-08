@@ -1,7 +1,17 @@
+# Go build cache client (GOCACHEPROG). Pinned by digest so a rebuild of this
+# image cannot pick up a different client than the one reviewed here. The
+# server it talks to is set per scale set through ARC_GOCACHE_URL.
+ARG GOCACHEPROG_IMAGE=ghcr.io/gfx-labs/arc-gocacheprog:sha-cfadbba@sha256:c4183197ff427952fe62a63e6e72ea54d2b0cb20a6ebf050f3282a66099ca47e
+
 # Default for local/manual builds. CI overrides this via --build-arg with the
 # resolved upstream release, so this value only matters when building by hand.
 # Pinned rather than `latest` so a plain `docker build` is reproducible.
 ARG RUNNER_VERSION=2.337.0
+
+# Stage only used to copy the client binary. ARGs above are global, so it
+# must come after them.
+FROM ${GOCACHEPROG_IMAGE} AS gocacheprog
+
 FROM ghcr.io/falcondev-oss/actions-runner:${RUNNER_VERSION}
 
 # Node major used for the preinstalled runtime, and the Playwright release whose
@@ -41,6 +51,13 @@ RUN apt-get update \
        zip \
        zstd \
     && rm -rf /var/lib/apt/lists/*
+
+# ── Go build cache client ────────────────────────────────────────────
+# Installed but not enabled. A job opts in by setting GOCACHEPROG to this
+# path, so existing workflows that restore ~/.cache/go-build themselves, or
+# that build release artifacts from a clean cache, are unchanged. See
+# toolcache/README.md for the workflow settings.
+COPY --from=gocacheprog /usr/local/bin/arc-gocacheprog /usr/local/bin/arc-gocacheprog
 
 # ── GitHub CLI ────────────────────────────────────────────────────────
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -122,3 +139,8 @@ USER runner
 
 RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify \
     && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs --verify
+
+# The client must start and answer the protocol handshake with no server and
+# no network. It exits cleanly when stdin closes.
+RUN --network=none ARC_GOCACHE_DIR="$(mktemp -d)" \
+       sh -c '/usr/local/bin/arc-gocacheprog </dev/null | grep -q KnownCommands; rc=$?; rm -rf "$ARC_GOCACHE_DIR"; exit $rc'
