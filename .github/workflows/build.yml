@@ -35,6 +35,7 @@ jobs:
     runs-on: ubicloud-standard-2
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      go_stable: ${{ steps.resolve.outputs.go_stable }}
       should_build: ${{ steps.resolve.outputs.should_build }}
     steps:
       - name: Resolve version
@@ -48,6 +49,12 @@ jobs:
             VERSION=$(gh api repos/falcondev-oss/github-actions-runner/releases/latest --jq '.tag_name' | sed 's/^v//')
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Latest Go release, baked into the image via the manifest's `stable`
+          # entry. Passed as a build arg so a new release invalidates the cached
+          # toolcache stage.
+          GO_STABLE=$(curl -fsSL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version')
+          echo "go_stable=${GO_STABLE}" >> "$GITHUB_OUTPUT"
 
           # Decide whether to build.
           #
@@ -112,6 +119,7 @@ jobs:
           push: true
           build-args: |
             RUNNER_VERSION=${{ needs.check.outputs.version }}
+            GO_STABLE=${{ needs.check.outputs.go_stable }}
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
@@ -163,6 +171,7 @@ jobs:
           push: true
           build-args: |
             RUNNER_VERSION=${{ needs.check.outputs.version }}
+            GO_STABLE=${{ needs.check.outputs.go_stable }}
           tags: |
             ${{ env.IMAGE_NAME }}-android:${{ needs.check.outputs.version }}
             ${{ env.IMAGE_NAME }}-android:latest

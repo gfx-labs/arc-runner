@@ -44,7 +44,11 @@ ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
 ENV COREPACK_HOME=/opt/corepack
 COPY toolcache/ /opt/runner-toolcache/
-RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
+# Latest Go release (e.g. go1.27.1), resolved by CI. Changing it invalidates
+# this stage so the manifest's `stable` entry is re-resolved. Empty for local
+# builds, which then install whatever is current when the layer is first built.
+ARG GO_STABLE=
+RUN GO_STABLE="${GO_STABLE}" /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
     && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs
 
 # ── Android SDK ───────────────────────────────────────────────────────
