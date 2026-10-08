@@ -33,4 +33,4 @@ docker run --rm --network none --entrypoint /home/runner/externals/node24/bin/no
 
 Provision or verify a single tool with `--tool node`, `--tool go`, or `--tool ruby`. The verification mode never downloads action sources and uses a dead proxy as an additional check. Container network isolation is the definitive no-download check.
 
-Build the general image with `docker build -t arc-runner:toolcache .` and the Android image with `docker build -f Dockerfile.android -t arc-runner-android:toolcache .`. The normal publication workflow still builds the general image for amd64 and arm64, and the Android image for amd64.
+Build the general image with `docker build -t arc-runner:toolcache .` and the Android image with `docker build -f Dockerfile.android -t arc-runner-android:toolcache .`. The publication workflow builds both images for amd64 only.

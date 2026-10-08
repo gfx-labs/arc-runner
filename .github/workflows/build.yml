@@ -115,10 +115,10 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           # The image carries Node and the Playwright/Chromium system deps now,
           # so it roughly doubled in size. mode=max exported every intermediate
-          # layer for both platforms and overwhelmed the GitHub Actions cache:
+          # layer and overwhelmed the GitHub Actions cache:
           # the export failed with "Could not authorize multipart upload" and
           # cancelled the in-flight push, so a fully built image was never
           # published.

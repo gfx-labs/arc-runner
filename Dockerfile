@@ -73,9 +73,8 @@ RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
     && apt-get install -y --no-install-recommends temurin-${JAVA_MAJOR}-jdk \
     && rm -rf /var/lib/apt/lists/*
 
-# Resolved rather than hardcoded to amd64, since this image is also published
-# for arm64 and the package path carries the Debian architecture. TARGETARCH is
-# supplied by buildx and must be re-declared to be usable in this stage.
+# The package path carries the Debian architecture. TARGETARCH is supplied by
+# buildx and must be re-declared to be usable in this stage.
 ARG TARGETARCH
 ENV JAVA_HOME=/usr/lib/jvm/temurin-${JAVA_MAJOR}-jdk-${TARGETARCH}
 
