@@ -37,7 +37,7 @@ Build the general image with `docker build -t arc-runner:toolcache .` and the An
 
 ## Go build cache
 
-Both images include the [arc-gocacheprog](https://github.com/gfx-labs/arc-gocacheprog) client at `/usr/local/bin/arc-gocacheprog`, copied from a digest-pinned image (`GOCACHEPROG_IMAGE` in each Dockerfile). It is not enabled by default. A job opts in:
+Both images include the [arc-gocacheprog](https://github.com/gfx-labs/arc-gocacheprog) client at `/usr/local/bin/arc-gocacheprog` (on `PATH`), copied from a digest-pinned image (`GOCACHEPROG_IMAGE` in each Dockerfile). It is not enabled by default. A job opts in:
 
 ```yaml
 jobs:
@@ -46,7 +46,7 @@ jobs:
       contents: read
       id-token: write   # the client exchanges this for a cache token
     env:
-      GOCACHEPROG: /usr/local/bin/arc-gocacheprog
+      GOCACHEPROG: arc-gocacheprog
       ARC_GOCACHE_URL: http://arc-gocacheprog.<namespace>.svc
       ARC_GOCACHE_VERBOSE: "1"   # hit/miss stats after each go command
     steps:

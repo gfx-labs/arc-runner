@@ -73,8 +73,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Go build cache client ────────────────────────────────────────────
-# Installed but not enabled. A job opts in by setting GOCACHEPROG to this
-# path, so existing workflows that restore ~/.cache/go-build themselves, or
+# Installed but not enabled. A job opts in with GOCACHEPROG=arc-gocacheprog,
+# so existing workflows that restore ~/.cache/go-build themselves, or
 # that build release artifacts from a clean cache, are unchanged. See
 # toolcache/README.md for the workflow settings.
 COPY --from=gocacheprog /usr/local/bin/arc-gocacheprog /usr/local/bin/arc-gocacheprog
