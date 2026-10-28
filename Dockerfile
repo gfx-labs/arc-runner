@@ -6,7 +6,7 @@ ARG GOCACHEPROG_IMAGE=ghcr.io/gfx-labs/arc-gocacheprog:0.0.1@sha256:3647c39f14b6
 # Default for local/manual builds. CI overrides this via --build-arg with the
 # resolved upstream release, so this value only matters when building by hand.
 # Pinned rather than `latest` so a plain `docker build` is reproducible.
-ARG RUNNER_VERSION=2.337.0
+ARG RUNNER_VERSION=2.338.0
 
 # Stage only used to copy the client binary. ARGs above are global, so it
 # must come after them.
@@ -26,6 +26,13 @@ ARG PLAYWRIGHT_VERSION=1.63.0
 ARG JAVA_MAJOR=21
 
 USER root
+
+COPY security/ /opt/runner-security/
+ENV NODE_OPTIONS=--use-openssl-ca \
+    UV_SYSTEM_CERTS=true \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt
 
 # ── Common CI utilities ──────────────────────────────────────────────
 RUN apt-get update \
@@ -50,6 +57,7 @@ RUN apt-get update \
        xz-utils \
        zip \
        zstd \
+    && python3 /opt/runner-security/trust.py system \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Go build cache client ────────────────────────────────────────────
@@ -94,6 +102,8 @@ RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
 # buildx and must be re-declared to be usable in this stage.
 ARG TARGETARCH
 ENV JAVA_HOME=/usr/lib/jvm/temurin-${JAVA_MAJOR}-jdk-${TARGETARCH}
+RUN python3 /opt/runner-security/trust.py java
+ENV JAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=/opt/runner-security/cacerts
 
 # ── Ruby native-extension dependencies ────────────────────────────────
 # fastlane runs on the host to talk to Google Play, so the release jobs need
@@ -136,6 +146,8 @@ RUN /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs \
     && chown -R runner:runner /opt/hostedtoolcache /opt/corepack
 
 USER runner
+
+RUN --network=none python3 /opt/runner-security/trust.py verify
 
 RUN --network=none /home/runner/externals/node24/bin/node /opt/runner-toolcache/install.mjs --verify \
     && /home/runner/externals/node24/bin/node /opt/runner-toolcache/corepack.mjs --verify
