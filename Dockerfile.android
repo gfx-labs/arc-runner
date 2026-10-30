@@ -40,8 +40,10 @@ ARG JAVA_MAJOR=21
 # whatever the project asks for at job time, so the only symptom is a slow
 # build that silently re-fetches what this image was meant to provide.
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
-ARG ANDROID_PLATFORM=android-36
-ARG ANDROID_BUILD_TOOLS=36.0.0
+# Space-separated: main still compiles against 36 while the Expo SDK 58 upgrade
+# moves to 37. Drop 36 once that lands.
+ARG ANDROID_PLATFORMS="android-36 android-37.0"
+ARG ANDROID_BUILD_TOOLS="36.0.0 37.0.0"
 ARG ANDROID_NDK_VERSION=27.1.12297006
 ARG ANDROID_CMAKE_VERSION=3.22.1
 
@@ -172,10 +174,9 @@ RUN curl --fail --location --silent --show-error \
 # Split across layers so bumping the platform or build-tools does not force the
 # NDK, which is the bulk of the image, to download again.
 RUN yes | sdkmanager --licenses > /dev/null \
-    && sdkmanager --install \
-       'platform-tools' \
-       "platforms;${ANDROID_PLATFORM}" \
-       "build-tools;${ANDROID_BUILD_TOOLS}"
+    && sdkmanager --install 'platform-tools' \
+       $(for p in ${ANDROID_PLATFORMS}; do printf 'platforms;%s ' "$p"; done) \
+       $(for b in ${ANDROID_BUILD_TOOLS}; do printf 'build-tools;%s ' "$b"; done)
 
 RUN sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
 
